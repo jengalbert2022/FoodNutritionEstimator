@@ -1,0 +1,7 @@
+
+Image: foodphoto.jpg
+  seaweed_salad       :  1.41%
+  prime_rib           :  1.31%
+  ravioli             :  1.30%
+  chocolate_mousse    :  1.30%
+  baby_back_ribs      :  1.28%
