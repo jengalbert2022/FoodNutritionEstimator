@@ -1,96 +1,178 @@
+#!/usr/bin/env python3
+"""
+train_food101.py
+----------------
+End-to-end mixed-precision training script for Food-101 laid out as:
+
+food-101/
+    images/<class_name>/<image_id>.jpg
+    meta/
+        classes.txt
+        train.txt
+        test.txt
+"""
+
+import os
 import json
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from keras.models import Model
-from keras.applications.inception_v3 import InceptionV3
-from keras.layers import (
-    Input,
-    AveragePooling2D,#AveragePooling2D is when you have a fixed dimension, GlobalAveragePooling2D is for variable dimensions
-    Dropout,
-    Flatten,
-    Dense
+import random
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import mixed_precision
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
+from tensorflow.keras.callbacks import (
+    ModelCheckpoint,
+    CSVLogger,
+    ReduceLROnPlateau
 )
-from keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateScheduler
-from keras.optimizers import SGD
-from keras.regularizers import l2
-import keras.backend as K
+from tensorflow.keras.optimizers import SGD
 
-from utils import *
-    
-def schedule(epoch):
-    if epoch < 5:
-        return 0.001
-    elif epoch < 10:
-        return .0002
-    elif epoch < 15:
-        return 0.00002
-    else:
-        return .0000005
+# mixed precision
+mixed_precision.set_global_policy("mixed_float16")  # automatic dynamic scaling
 
-NUM_EPOCHS = 10 #set num epochs
+# ───────────────────── paths & constants ────────────────────
+ROOT_DIR   = "food-101"
+IMG_DIR    = os.path.join(ROOT_DIR, "images")
+META_DIR   = os.path.join(ROOT_DIR, "meta")
+TRAIN_SPL  = os.path.join(META_DIR, "train.txt")
+TEST_SPL   = os.path.join(META_DIR, "test.txt")
+CLASSES_TXT = os.path.join(META_DIR, "classes.txt")
 
-shape = (224, 224) #changed
-batch_size = 32
+BATCH_SIZE = 32
+IMG_SIZE   = (299, 299)           # InceptionV3 native resolution
+NUM_EPOCHS = 50
+AUTOTUNE   = tf.data.AUTOTUNE
 
-train_datagen = ImageDataGenerator(
-    rescale=1./255,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True
-)
-test_datagen = ImageDataGenerator(rescale=1./255)
+# ───────────────────── utilities ────────────────────────────
+def read_classes(path):
+    with open(path) as f:
+        classes = [ln.strip() for ln in f]
+    class_to_idx = {c: i for i, c in enumerate(classes)}
+    return classes, class_to_idx
 
-X_train = train_datagen.flow_from_directory(
-    'food-101/train',
-    target_size=shape,
-    batch_size=batch_size,
-    class_mode='categorical'
-)
-# — save class_indices for inference later —
-with open('class_indices.json', 'w') as f:
-    json.dump(X_train.class_indices, f, indent=2)
+def read_split(path):
+    with open(path) as f:
+        # Each line like "apple_pie/1005649" (no extension)
+        return [ln.strip() for ln in f]
 
-X_test = test_datagen.flow_from_directory(
-    'food-101/test',
-    target_size=shape,
-    batch_size=batch_size,
-    class_mode='categorical'
-)
+def make_file_label_lists(split_lines, class_to_idx):
+    files, labels = [], []
+    for rel in split_lines:
+        cls, img_id = rel.split("/", 1)
+        files.append(os.path.join(IMG_DIR, cls, f"{img_id}.jpg"))
+        labels.append(class_to_idx[cls])
+    return files, labels
 
-base_model = InceptionV3( #changed 
-    weights='imagenet',
+def decode_image(filename, label):
+    img = tf.io.read_file(filename)
+    img = tf.image.decode_jpeg(img, channels=3)
+    img = tf.image.resize(img, IMG_SIZE)
+    img = tf.cast(img, tf.float16) / 255.0
+    return img, label
+
+def augment(img, label):
+    img = tf.image.random_flip_left_right(img)
+    img = tf.image.random_brightness(img, 0.2)
+    img = tf.image.random_contrast(img, 0.8, 1.2)
+    img = tf.image.random_saturation(img, 0.8, 1.2)
+    return img, label
+
+def build_dataset(files, labels, training):
+    ds = tf.data.Dataset.from_tensor_slices((files, labels))
+    if training:
+        ds = ds.shuffle(len(files), seed=SEED)
+    ds = ds.map(decode_image, num_parallel_calls=AUTOTUNE)
+    if training:
+        ds = ds.map(augment, num_parallel_calls=AUTOTUNE)
+    ds = ds.batch(BATCH_SIZE).prefetch(AUTOTUNE)
+    return ds
+
+# ───────────────────── data preparation ─────────────────────
+classes, class_to_idx = read_classes(CLASSES_TXT)
+train_lines = read_split(TRAIN_SPL)
+test_lines  = read_split(TEST_SPL)
+
+train_files, train_labels = make_file_label_lists(train_lines, class_to_idx)
+test_files,  test_labels  = make_file_label_lists(test_lines,  class_to_idx)
+
+train_ds = build_dataset(train_files, train_labels, training=True)
+val_ds   = build_dataset(test_files,  test_labels,  training=False)
+
+# Save class indices for later inference
+with open("class_indices.json", "w") as f:
+    json.dump(class_to_idx, f, indent=2)
+
+# ───────────────────── model definition ─────────────────────
+base_model = InceptionV3(
+    weights="imagenet",
     include_top=False,
-    input_shape=(224,224,3)
+    input_shape=(*IMG_SIZE, 3)
+)
+base_model.trainable = False          # first train only the head
+
+inputs = base_model.input
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = Dropout(0.5)(x)
+preds = Dense(
+    len(classes),
+    activation="softmax",
+    dtype="float32"                   # keep final logits in FP32
+)(x)
+
+model = tf.keras.Model(inputs, preds)
+
+# ───────────────────── compilation ──────────────────────────
+opt = SGD(learning_rate=1e-3, momentum=0.9)
+model.compile(
+    optimizer=opt,
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
 )
 
-x = base_model.output
-x = AveragePooling2D(pool_size=(5, 5))(x) #changed
+# ───────────────────── callbacks ────────────────────────────
+ckpt = ModelCheckpoint(
+    "checkpoints/best.keras",
+    monitor="val_accuracy",
+    save_best_only=True,
+    save_weights_only=False,
+    verbose=1
+)
 
-x = Dropout(.5)(x)
-x = Flatten()(x)
-predictions = Dense(
-    X_train.num_classes,
-    kernel_initializer='glorot_uniform',
-    kernel_regularizer=l2(0.0005),
-    activation='softmax'
-)(x) #changed
-model = Model(inputs=base_model.input, outputs=predictions) #changed
-opt = SGD(learning_rate=0.1, momentum=0.9) #changed
-model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
+csv_log = CSVLogger("training.log")
 
-checkpointer = ModelCheckpoint(
-    filepath='model.{epoch:02d}-{val_loss:.2f}.keras',
+lr_plateau = ReduceLROnPlateau(
+    monitor="val_loss",
+    factor=0.2,
+    patience=3,
     verbose=1,
-    save_best_only=True
-) #changed
-csv_logger = CSVLogger('model.log')
+    min_lr=1e-6
+)
 
+callbacks = [ckpt, csv_log, lr_plateau]
 
-lr_scheduler = LearningRateScheduler(schedule)
+# ───────────────────── training (head) ──────────────────────
 model.summary()
+model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=NUM_EPOCHS // 2,
+    callbacks=callbacks
+)
+
+# ───────────────────── fine-tune whole network ──────────────
+base_model.trainable = True
+opt_fine = SGD(learning_rate=1e-4, momentum=0.9)
+model.compile(
+    optimizer=opt_fine,
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
 
 model.fit(
-    X_train,
-    validation_data=X_test,
-    epochs=2,
-    callbacks=[checkpointer]
+    train_ds,
+    validation_data=val_ds,
+    epochs=NUM_EPOCHS,
+    initial_epoch=NUM_EPOCHS // 2,
+    callbacks=callbacks
 )
