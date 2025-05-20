@@ -10,7 +10,7 @@ MODEL_PATH = "checkpoints/best.keras"
 TRAIN_PATH = "food-101/train"
 TEST_PATH  = "food-101/test"
 BATCH_SIZE = 32
-IMG_DIMS   = (224, 224)  # match training image dimensions
+IMG_DIMS   = (299, 299)  # match training image dimensions
 
 # 1) Load the trained model
 model = load_model(MODEL_PATH)

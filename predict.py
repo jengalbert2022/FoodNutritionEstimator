@@ -21,7 +21,7 @@ def build_label_map(train_dir, target_size=(224,224), batch_size=32):
     # generator.class_indices: dict label->index
     return {v: k for k, v in generator.class_indices.items()}
 
-def preprocess_image(img_path, target_size=(224,224)):
+def preprocess_image(img_path, target_size=(299,299)):
     """
     Load an image file and preprocess it for model.predict().
     """
@@ -45,7 +45,7 @@ def main():
     )
     parser.add_argument(
         "--output-file", "-o",
-        default="predictions.txt",
+        default="my_preds.txt",
         help="File to write the predictions (food labels and percentages)"
     )
     parser.add_argument(

@@ -80,7 +80,7 @@ def augment(img, label):
 def build_dataset(files, labels, training):
     ds = tf.data.Dataset.from_tensor_slices((files, labels))
     if training:
-        ds = ds.shuffle(len(files), seed=SEED)
+        ds = ds.shuffle(len(files))
     ds = ds.map(decode_image, num_parallel_calls=AUTOTUNE)
     if training:
         ds = ds.map(augment, num_parallel_calls=AUTOTUNE)
