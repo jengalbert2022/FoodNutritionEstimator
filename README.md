@@ -80,7 +80,7 @@ Change paths at the top of the script if your layout differs.
 
 ---
 
-## 5. Predicting on your own images
+## 5. Predicting on sample images
 
 ```bash
 # single image
