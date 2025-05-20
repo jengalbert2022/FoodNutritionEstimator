@@ -1,7 +1,21 @@
 
-Image: foodphoto.jpg
-  seaweed_salad       :  1.41%
-  prime_rib           :  1.31%
-  ravioli             :  1.30%
-  chocolate_mousse    :  1.30%
-  baby_back_ribs      :  1.28%
+Image: samples/gyoza.jpg
+  gyoza               : 99.94%
+  dumplings           :  0.04%
+  sushi               :  0.01%
+  takoyaki            :  0.00%
+  cannoli             :  0.00%
+
+Image: samples/wings.jpg
+  chicken_wings       : 65.26%
+  samosa              : 18.76%
+  baklava             :  4.70%
+  dumplings           :  2.90%
+  fish_and_chips      :  1.93%
+
+Image: samples/nachos.jpg
+  nachos              : 99.48%
+  guacamole           :  0.11%
+  hummus              :  0.04%
+  tuna_tartare        :  0.04%
+  pizza               :  0.03%
