@@ -59,7 +59,6 @@ $ python train.py
 ```
 
 * Two training phases are run: first the classification head only, then the entire network is fine‑tuned.
-* Checkpoints are written to `; the best model is saved as `.
 * `class_indices.json` is written at the repo root for later inference.
 
 ---
