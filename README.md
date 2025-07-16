@@ -17,7 +17,18 @@ $ cd food101
 $ python3 -m venv food101-env
 $ source food101-env/bin/activate
 ```
+Powershell
+```bash
+# clone this repo and enter it
+$ git clone https://github.com/jengalbert2022/FoodNutritionEstimator.git
+$ cd food101
 
+# create and activate a virtual environment
+$ .\food101-env\Scripts\Activate.ps1
+
+#get data
+$ curl -o food-101.tar.gz http://data.vision.ee.ethz.ch/cvl/food-101.tar.gz
+```
 | Use‑case              | Pip command                                                                    |
 | --------------------- | ------------------------------------------------------------------------------ |
 | **CPU‑only**          | `pip install tensorflow tensorflow_datasets matplotlib pandas scipy`           |
